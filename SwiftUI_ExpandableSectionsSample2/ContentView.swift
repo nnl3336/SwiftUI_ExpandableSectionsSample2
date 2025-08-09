@@ -18,72 +18,75 @@ struct RecursiveDisclosureGroup: View {
     @State private var isExpanded = false
     
     // 入力用の状態変数
-    @State private var showingAddFolderSheet = false
+    @State private var showingAddSubFolderSheet = false
     @State private var newFolderTitle = ""
     
     var body: some View {
-        if folder.childrenArray.isEmpty {
-            Label(folder.title ?? "", systemImage: "folder")
-                .padding(.leading, CGFloat(level) * 20)
-        } else {
-            DisclosureGroup(
-                isExpanded: $isExpanded,
-                content: {
-                    if level < maxLevel {
-                        ForEach(folder.childrenArray) { child in
-                            RecursiveDisclosureGroup(folder: child, level: level + 1, maxLevel: maxLevel)
+        Group {
+            if folder.childrenArray.isEmpty {
+                Label(folder.title ?? "", systemImage: "folder")
+            } else {
+                DisclosureGroup(
+                    isExpanded: $isExpanded,
+                    content: {
+                        if level < maxLevel {
+                            ForEach(folder.childrenArray) { child in
+                                RecursiveDisclosureGroup(folder: child, level: level + 1, maxLevel: maxLevel)
+                            }
+                        } else {
+                            Text("もっと深い階層があります...")
+                                .italic()
+                                .padding(.leading, CGFloat(level + 1) * 20)
                         }
-                    } else {
-                        Text("もっと深い階層があります...")
-                            .italic()
-                            .padding(.leading, CGFloat(level + 1) * 20)
+                    },
+                    label: {
+                        Label(folder.title ?? "", systemImage: "folder")
                     }
-                },
-                label: {
-                    Label(folder.title ?? "", systemImage: "folder")
-                        .padding(.leading, CGFloat(level) * 20)
-                }
-            )
-            .contextMenu {
-                Button("サブフォルダ追加") {
-                    newFolderTitle = "" // 入力欄クリア
-                    showingAddFolderSheet = true
-                }
-                Button(role: .destructive) {
-                    deleteFolder(folder)
-                } label: {
-                    Label("削除", systemImage: "trash")
-                }
+                )
             }
-            .alert("make Folder ?", isPresented: $showingAddFolderSheet){
-                TextField("text", text: $newFolderTitle)
-                    .textInputAutocapitalization(.never)
-                Button(role: .cancel, action: {}, label: {Text("cancel")})
-                Button(role: .none, action: {
-                    addSubfolder(to: folder, title: newFolderTitle)
-                }, label: {Text("Make")})
-            } message: {
-                Text("")
+        }
+        .contextMenu {
+            Button("サブフォルダ追加") {
+                newFolderTitle = ""
+                showingAddSubFolderSheet = true
             }
+            Button(role: .destructive) {
+                deleteFolder(folder)
+            } label: {
+                Label("削除", systemImage: "trash")
+            }
+        }
+        .alert("make Sub Folder ?", isPresented: $showingAddSubFolderSheet){
+            TextField("text", text: $newFolderTitle)
+                .textInputAutocapitalization(.never)
+            Button(role: .cancel, action: {}, label: {Text("cancel")})
+            Button(role: .none, action: {
+                addSubfolder(to: folder, level: level, title: newFolderTitle)
+            }, label: {Text("Make")})
+        } message: {
+            Text("")
         }
     }
     
-    func addSubfolder(to folder: Folder, title: String) {
+    func addSubfolder(to folder: Folder, level: Int, title: String) {
         let newFolder = Folder(context: viewContext)
         newFolder.id = UUID()
         newFolder.title = title
-        newFolder.parent = folder
         
-        var currentChildren = folder.childrenArray
-        currentChildren.append(newFolder)
-        folder.children = NSSet(array: currentChildren)
-        
+        // level 0 のときはルートに追加（親なし）
+        if level > 0 {
+            newFolder.parent = folder
+        } else {
+            newFolder.parent = nil
+        }
+
         do {
             try viewContext.save()
         } catch {
             print("保存エラー: \(error)")
         }
     }
+
     
     func deleteFolder(_ folder: Folder) {
         viewContext.delete(folder)
@@ -95,7 +98,7 @@ struct RecursiveDisclosureGroup: View {
     }
 }
 
-struct FolderContextMenuView: View {
+/*struct FolderContextMenuView: View {
     let folder: Folder
     let viewContext: NSManagedObjectContext
     
@@ -120,9 +123,9 @@ struct FolderContextMenuView: View {
         newFolder.title = "新しいフォルダ"
         newFolder.parent = folder
         
-        var currentChildren = folder.childrenArray
+        /*var currentChildren = folder.childrenArray
         currentChildren.append(newFolder)
-        folder.children = NSSet(array: currentChildren)
+        folder.children = NSSet(array: currentChildren)*/
         
         do {
             try viewContext.save()
@@ -139,7 +142,7 @@ struct FolderContextMenuView: View {
             print("削除失敗: \(error)")
         }
     }
-}
+}*/
 
 //
 
@@ -154,28 +157,67 @@ struct ContentView: View {
     let maxLevel = 3
     let rootLevel = 0
     
+    
+    @State private var showingAddFolderSheet = false
+    @State private var newFolderTitle = ""
+    
     var body: some View {
         NavigationView {
             List {
-                ForEach(folders) { folder in
+                ForEach(folders.filter { $0.parent == nil }) { folder in
                     RecursiveDisclosureGroup(folder: folder, level: rootLevel, maxLevel: maxLevel)
                 }
             }
             .listStyle(.insetGrouped)
             .navigationTitle("Folders")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: {
+                        showingAddFolderSheet = true
+                    }) {
+                        Image(systemName: "plus")
+                    }
+                }
+            }
+            .alert("Make Folder?", isPresented: $showingAddFolderSheet) {
+                TextField("Folder name", text: $newFolderTitle)
+                    .textInputAutocapitalization(.never)
+                Button("Cancel", role: .cancel) {}
+                Button("Make") {
+                    addFolder(title: newFolderTitle)
+                }
+            } message: {
+                Text("")
+            }
         }
+
+        
     }
     
-    private func addFolder() {
+    func addFolder(to folder: Folder? = nil, title: String) {
         let newFolder = Folder(context: viewContext)
         newFolder.id = UUID()
-        newFolder.title = "新しいフォルダ"
-        newFolder.children = nil
-        
+        newFolder.title = title
+        newFolder.parent = folder
+
+        guard let folder = folder else {
+            // folderがnil（＝ルートに追加）ならchildren更新は不要
+            do {
+                try viewContext.save()
+            } catch {
+                print("保存エラー: \(error)")
+            }
+            return
+        }
+
+        var currentChildren = folder.childrenArray
+        currentChildren.append(newFolder)
+        folder.children = NSSet(array: currentChildren)
+
         do {
             try viewContext.save()
         } catch {
-            print("Error saving new folder: \(error)")
+            print("保存エラー: \(error)")
         }
     }
 }
