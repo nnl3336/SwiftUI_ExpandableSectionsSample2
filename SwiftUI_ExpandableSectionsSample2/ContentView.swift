@@ -17,13 +17,15 @@ struct RecursiveDisclosureGroup: View {
     
     @State private var isExpanded = false
     
+    @State private var selectedFolder: Folder? = nil
+    
     // 入力用の状態変数
     @State private var showingAddSubFolderSheet = false
     @State private var newFolderTitle = ""
     
     var body: some View {
         Group {
-            if folder.childrenArray.isEmpty {
+            if folder.childrenArray/*(atLevel: level)*/.isEmpty {
                 Label(folder.title ?? "", systemImage: "folder")
             } else {
                 DisclosureGroup(
@@ -31,10 +33,10 @@ struct RecursiveDisclosureGroup: View {
                     content: {
                         if level < maxLevel {
                             ForEach(folder.childrenArray) { child in
-                                RecursiveDisclosureGroup(folder: child, level: level + 1, maxLevel: maxLevel)
+                                RecursiveDisclosureGroup(folder: folder, level: level + 1, maxLevel: maxLevel)
                             }
                         } else {
-                            Text("もっと深い階層があります...")
+                            Text("もっと深い階層があります…")
                                 .italic()
                                 .padding(.leading, CGFloat(level + 1) * 20)
                         }
@@ -48,6 +50,7 @@ struct RecursiveDisclosureGroup: View {
         .contextMenu {
             Button("サブフォルダ追加") {
                 newFolderTitle = ""
+                selectedFolder = folder
                 showingAddSubFolderSheet = true
             }
             Button(role: .destructive) {
@@ -56,37 +59,36 @@ struct RecursiveDisclosureGroup: View {
                 Label("削除", systemImage: "trash")
             }
         }
-        .alert("make Sub Folder ?", isPresented: $showingAddSubFolderSheet){
+        .alert("make Sub Folder ?", isPresented: $showingAddSubFolderSheet) {
             TextField("text", text: $newFolderTitle)
                 .textInputAutocapitalization(.never)
-            Button(role: .cancel, action: {}, label: {Text("cancel")})
-            Button(role: .none, action: {
-                addSubfolder(to: folder, level: level, title: newFolderTitle)
-            }, label: {Text("Make")})
+            Button("Cancel", role: .cancel) {}
+            Button("Make") {
+                if let targetFolder = selectedFolder {
+                    addSubfolder(to: targetFolder, level: level, title: newFolderTitle)
+                }
+            }
         } message: {
             Text("")
         }
     }
     
-    func addSubfolder(to folder: Folder, level: Int, title: String) {
+    func addSubfolder(to folder: Folder?, level: Int, title: String) {
         let newFolder = Folder(context: viewContext)
         newFolder.id = UUID()
         newFolder.title = title
-        
-        // level 0 のときはルートに追加（親なし）
-        if level > 0 {
-            newFolder.parent = folder
-        } else {
-            newFolder.parent = nil
-        }
+        newFolder.parent = folder
 
         do {
             try viewContext.save()
+            print("親フォルダ: \(folder?.title ?? "") の子フォルダ一覧：")
+            for child in folder?.childrenArray ?? [] {
+                print(" - \(child.title ?? "")")
+            }
         } catch {
             print("保存エラー: \(error)")
         }
     }
-
     
     func deleteFolder(_ folder: Folder) {
         viewContext.delete(folder)
@@ -210,9 +212,9 @@ struct ContentView: View {
             return
         }
 
-        var currentChildren = folder.childrenArray
+        /*var currentChildren = folder.childrenArray(atLevel: level)
         currentChildren.append(newFolder)
-        folder.children = NSSet(array: currentChildren)
+        folder.children = NSSet(array: currentChildren)*/
 
         do {
             try viewContext.save()
@@ -222,13 +224,37 @@ struct ContentView: View {
     }
 }
 
-
 extension Folder {
     var childrenArray: [Folder] {
         let set = children as? Set<Folder> ?? []
-        return set.sorted { $0.title ?? "" < $1.title ?? "" }
+        let sorted = set.sorted { ($0.title ?? "") < ($1.title ?? "") }
+        return sorted
     }
 }
+
+/*extension Folder {
+    func childrenArray(atLevel level: Int) -> [Folder] {
+        let set = children as? Set<Folder> ?? []
+        let filtered = set.filter { $0.level == level }
+        let sorted = filtered.sorted { ($0.title ?? "") < ($1.title ?? "") }
+        return sorted
+    }
+}*/
+
+/*
+extension Folder {
+    var level: Int {
+        var depth = 0
+        var current = parent
+        while current != nil {
+            depth += 1
+            current = current?.parent
+        }
+        return depth
+    }
+}
+*/
+
 
 
 /*
