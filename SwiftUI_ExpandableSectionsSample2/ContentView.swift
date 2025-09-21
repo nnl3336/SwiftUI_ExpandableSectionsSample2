@@ -9,6 +9,8 @@ import SwiftUI
 import CoreData
 
 struct FolderListView: View {
+    let maxLevel = 3 // ここで定義
+
     let folder: Folder
     let level: Int
     
@@ -27,17 +29,26 @@ struct FolderListView: View {
             if folder.childrenArray.isEmpty {
                 Label(folder.title ?? "タイトルなし", systemImage: "folder")
             } else {
-                DisclosureGroup(folder.title ?? "タイトルなし") {
-                    if level < 4 {
-                        ForEach(folder.childrenArray, id: \.self) { child in
-                            FolderListView(folder: child, level: level + 1)
+                DisclosureGroup(
+                    isExpanded: $isExpanded,
+                    content: {
+                        if level < maxLevel {
+                            ForEach(folder.childrenArray, id: \.self) { child in
+                                FolderRowView(folder: child, level: level + 1, maxLevel: maxLevel)
+                            }
+                        } else {
+                            Text("もっと深い階層があります…")
+                                .italic()
+                                .padding(.leading, CGFloat(level + 1) * 20)
                         }
-                    } else {
-                        Text("もっと深い階層があります…")
-                            .italic()
-                            .padding(.leading, CGFloat(level + 1) * 20)
+                    },
+                    label: {
+                        // ここで必ず先頭に folder systemName アイコンを付ける
+                        Label(folder.title ?? "タイトルなし", systemImage: "folder")
+                            .padding(.leading, CGFloat(level) * 20)
                     }
-                }
+                )
+
             }
         }
         .contextMenu {
@@ -93,6 +104,77 @@ struct FolderListView: View {
     }
 }
 
+// まず FolderRowView を定義
+struct FolderRowView: View {
+    @Environment(\.managedObjectContext) private var viewContext
+    
+    let folder: Folder
+    let level: Int
+    let maxLevel: Int
+    
+    @State private var isExpanded = false
+    @State private var showingAddSheet = false
+    @State private var newFolderTitle = ""
+    
+    var body: some View {
+        Group {
+            if folder.childrenArray.isEmpty {
+                Label(folder.title ?? "タイトルなし", systemImage: "folder")
+                    .padding(.leading, CGFloat(level) * 20)
+            } else {
+                DisclosureGroup(
+                    isExpanded: $isExpanded,
+                    content: {
+                        if level < maxLevel {
+                            ForEach(folder.childrenArray, id: \.self) { child in
+                                FolderRowView(folder: child, level: level + 1, maxLevel: maxLevel)
+                            }
+                        } else {
+                            Text("もっと深い階層があります…")
+                                .italic()
+                                .padding(.leading, CGFloat(level + 1) * 20)
+                        }
+                    },
+                    label: {
+                        Label(folder.title ?? "タイトルなし", systemImage: "folder")
+                            .padding(.leading, CGFloat(level) * 20)
+                    }
+                )
+            }
+        }
+        .contextMenu {
+            Button("サブフォルダ追加") {
+                newFolderTitle = ""
+                showingAddSheet = true
+            }
+            Button(role: .destructive) {
+                deleteFolder(folder)
+            } label: {
+                Label("削除", systemImage: "trash")
+            }
+        }
+        .alert("サブフォルダ作成", isPresented: $showingAddSheet) {
+            TextField("名前", text: $newFolderTitle)
+            Button("キャンセル", role: .cancel) {}
+            Button("作成") { addSubfolder() }
+        }
+    }
+    
+    private func addSubfolder() {
+        let newFolder = Folder(context: viewContext)
+        newFolder.id = UUID()
+        newFolder.title = newFolderTitle
+        newFolder.parent = folder
+        try? viewContext.save()
+    }
+    
+    private func deleteFolder(_ folder: Folder) {
+        folder.childrenArray.forEach { deleteFolder($0) }
+        viewContext.delete(folder)
+        try? viewContext.save()
+    }
+}
+
 
 struct ContentView: View {
     @Environment(\.managedObjectContext) private var viewContext
@@ -102,70 +184,41 @@ struct ContentView: View {
         sortDescriptors: [NSSortDescriptor(keyPath: \Folder.title, ascending: true)]
     ) var folders: FetchedResults<Folder>
     
-    let maxLevel = 3
-    let rootLevel = 0
-    
     @State private var showingAddFolderSheet = false
     @State private var newFolderTitle = ""
     
+    let maxLevel = 3 // ここで定義
+
     var body: some View {
         NavigationView {
             List {
                 ForEach(folders.filter { $0.parent == nil }, id: \.self) { rootFolder in
-                    FolderListView(folder: rootFolder, level: 0)
+                    FolderRowView(folder: rootFolder, level: 0, maxLevel: maxLevel)
                 }
             }
             .listStyle(.insetGrouped)
             .navigationTitle("Folders")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: {
-                        showingAddFolderSheet = true
-                    }) {
+                    Button(action: { showingAddFolderSheet = true }) {
                         Image(systemName: "plus")
                     }
                 }
             }
-            .alert("Make Folder?", isPresented: $showingAddFolderSheet) {
-                TextField("Folder name", text: $newFolderTitle)
-                    .textInputAutocapitalization(.never)
-                Button("Cancel", role: .cancel) {}
-                Button("Make") {
-                    addFolder(title: newFolderTitle)
-                }
-            } message: {
-                Text("")
+            .alert("フォルダ作成", isPresented: $showingAddFolderSheet) {
+                TextField("名前", text: $newFolderTitle)
+                Button("キャンセル", role: .cancel) {}
+                Button("作成") { addFolder() }
             }
         }
-
-        
     }
     
-    func addFolder(to folder: Folder? = nil, title: String) {
+    private func addFolder() {
         let newFolder = Folder(context: viewContext)
         newFolder.id = UUID()
-        newFolder.title = title
-        newFolder.parent = folder
-
-        guard let folder = folder else {
-            // folderがnil（＝ルートに追加）ならchildren更新は不要
-            do {
-                try viewContext.save()
-            } catch {
-                print("保存エラー: \(error)")
-            }
-            return
-        }
-
-        /*var currentChildren = folder.childrenArray(atLevel: level)
-        currentChildren.append(newFolder)
-        folder.children = NSSet(array: currentChildren)*/
-
-        do {
-            try viewContext.save()
-        } catch {
-            print("保存エラー: \(error)")
-        }
+        newFolder.title = newFolderTitle
+        newFolder.parent = nil
+        try? viewContext.save()
     }
 }
 
